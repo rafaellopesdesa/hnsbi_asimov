@@ -1,0 +1,20 @@
+# Notebook state
+.ipynb_checkpoints/
+__pycache__/
+*.py[cod]
+
+# Local runtime
+.dependencies/
+workspace/
+
+# Generated artifacts if a notebook is run from the repository root
+dataframes/
+models*/
+plots*/
+saved*/
+*.onnx
+*.pt
+*.npy
+*.npz
+*.parquet
+
