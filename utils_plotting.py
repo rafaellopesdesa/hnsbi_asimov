@@ -5,10 +5,12 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.ndimage import gaussian_filter
-from scipy.stats import chi2, norm
+from scipy.stats import chi2, ncx2, norm
 
 __all__ = [
+    "plot_asimov_profile_comparison",
     "plot_flow_pair_closure",
+    "plot_hybrid_simulator_toy_comparison",
     "plot_log_density_truth_binned",
     "plot_log_density_truth_scatter",
     "plot_log_prob_cdf_closure",
@@ -641,6 +643,173 @@ def plot_mu_hat_toys(toy_results, sigma_by_mu, n_bins=35):
         ax.set_ylabel("probability / bin")
         ax.set_title(rf"toys generated at $\mu={mu_true:g}$")
         ax.legend(fontsize=9)
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_asimov_profile_comparison(
+    mu_values,
+    model_profile,
+    simulator_profile,
+    injected_mu,
+    simulator_mu_hat,
+):
+    """Compare internal and simulator-expected Asimov profiles."""
+    fig, ax = plt.subplots(figsize=(7.2, 5.0))
+    ax.plot(
+        mu_values,
+        model_profile,
+        color="black",
+        lw=2.2,
+        label="Learned-model Asimov",
+    )
+    ax.plot(
+        mu_values,
+        simulator_profile,
+        color="C1",
+        lw=2.2,
+        label="Simulator expectation, learned fit",
+    )
+    ax.axvline(
+        injected_mu,
+        color="C3",
+        ls=":",
+        lw=1.5,
+        label=rf"Injected $\mu_A={injected_mu:g}$",
+    )
+    ax.axvline(
+        simulator_mu_hat,
+        color="C1",
+        ls="--",
+        lw=1.3,
+        label=rf"Simulator pseudo-true $\mu={simulator_mu_hat:.3f}$",
+    )
+    ax.set_xlim(float(np.min(mu_values)), float(np.max(mu_values)))
+    ax.set_ylim(bottom=0.0)
+    ax.set_xlabel(r"$\mu$")
+    ax.set_ylabel(r"$t_\mu$")
+    ax.set_title("Internal and external Asimov constructions")
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    return fig
+
+
+def _histogram_probability(values, edges):
+    counts = np.histogram(values, bins=edges)[0].astype(np.float64)
+    return counts / len(values)
+
+
+def plot_hybrid_simulator_toy_comparison(
+    hybrid_toys,
+    simulator_toys,
+    injected_mu,
+    asimov_sigma_mu,
+    asimov_q_zero,
+    simulator_asimov_mu_hat,
+    simulator_asimov_q_zero,
+    n_bins=35,
+):
+    """Compare hybrid-model and simulator-based toy distributions."""
+    hybrid_subset = hybrid_toys.loc[
+        hybrid_toys["mu_true"] == float(injected_mu)
+    ]
+    simulator_subset = simulator_toys.loc[
+        simulator_toys["mu_true"] == float(injected_mu)
+    ]
+    hybrid_mu = hybrid_subset["mu_hat"].to_numpy(dtype=np.float64)
+    simulator_mu = simulator_subset["mu_hat"].to_numpy(dtype=np.float64)
+    hybrid_q_zero = hybrid_subset["q_zero"].to_numpy(dtype=np.float64)
+    simulator_q_zero = simulator_subset["q_zero"].to_numpy(dtype=np.float64)
+
+    fig, axes = plt.subplots(1, 2, figsize=(13.5, 5.0))
+
+    mu_upper = max(
+        float(np.max(hybrid_mu)) * 1.001,
+        float(np.max(simulator_mu)) * 1.001,
+        float(injected_mu) + 4.0 * float(asimov_sigma_mu),
+        1.25,
+    )
+    mu_edges = np.linspace(0.0, mu_upper, int(n_bins) + 1)
+    mu_gaussian_cdf = norm.cdf(
+        (mu_edges - float(injected_mu)) / float(asimov_sigma_mu)
+    )
+    mu_asimov_probability = np.diff(mu_gaussian_cdf)
+    mu_asimov_probability[0] += mu_gaussian_cdf[0]
+
+    axes[0].stairs(
+        _histogram_probability(hybrid_mu, mu_edges),
+        mu_edges,
+        fill=True,
+        alpha=0.28,
+        color="C0",
+        label="Hybrid-model toys",
+    )
+    axes[0].stairs(
+        _histogram_probability(simulator_mu, mu_edges),
+        mu_edges,
+        lw=2.2,
+        color="C1",
+        label="Simulator-based toys, learned fit",
+    )
+    axes[0].stairs(
+        mu_asimov_probability,
+        mu_edges,
+        lw=2.2,
+        color="black",
+        label=rf"Learned-model Asimov/Wald ($\sigma_A={asimov_sigma_mu:.3f}$)",
+    )
+    axes[0].axvline(injected_mu, color="C3", ls=":", lw=1.5)
+    axes[0].axvline(simulator_asimov_mu_hat, color="C1", ls="--", lw=1.3)
+    axes[0].set_xlabel(r"$\hat\mu$")
+    axes[0].set_ylabel("Probability per bin")
+    axes[0].set_title("Estimator closure")
+    axes[0].legend(fontsize=8)
+
+    q_upper = max(
+        float(np.max(hybrid_q_zero)) * 1.001,
+        float(np.max(simulator_q_zero)) * 1.001,
+        float(ncx2.ppf(0.999, df=1, nc=asimov_q_zero)),
+        1.0,
+    )
+    q_edges = np.linspace(0.0, q_upper, int(n_bins) + 1)
+    q_boundary_cdf = norm.cdf(np.sqrt(q_edges) - np.sqrt(asimov_q_zero))
+    q_boundary_probability = np.diff(q_boundary_cdf)
+    q_boundary_probability[0] += q_boundary_cdf[0]
+
+    axes[1].stairs(
+        _histogram_probability(hybrid_q_zero, q_edges),
+        q_edges,
+        fill=True,
+        alpha=0.28,
+        color="C0",
+        label="Hybrid-model toys",
+    )
+    axes[1].stairs(
+        _histogram_probability(simulator_q_zero, q_edges),
+        q_edges,
+        lw=2.2,
+        color="C1",
+        label="Simulator-based toys, learned fit",
+    )
+    axes[1].stairs(
+        q_boundary_probability,
+        q_edges,
+        lw=2.2,
+        color="black",
+        label="Learned-model Cowan prediction",
+    )
+    axes[1].axvline(asimov_q_zero, color="0.4", ls=":", lw=1.2)
+    axes[1].axvline(
+        simulator_asimov_q_zero,
+        color="C1",
+        ls="--",
+        lw=1.3,
+    )
+    axes[1].set_xlabel(r"$q_0$")
+    axes[1].set_ylabel("Probability per bin")
+    axes[1].set_title(r"Discovery statistic under $\mu_{\rm true}=1$")
+    axes[1].legend(fontsize=8)
 
     fig.tight_layout()
     return fig
