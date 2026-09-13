@@ -1,6 +1,6 @@
 # hNDE Asimov demonstration
 
-Reproduce the numerical studies in [the paper](https://github.com/rafaellopesdesa/hybrid_nsbi_2).
+Reproduce the numerical studies in the paper.
 
 | Run order | Notebook | Paper |
 | --- | --- | --- |
