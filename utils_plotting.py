@@ -6,6 +6,112 @@ from scipy.ndimage import gaussian_filter
 from scipy.stats import ncx2, norm
 
 
+def _paper_style():
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.serif": ["Latin Modern Roman", "CMU Serif", "DejaVu Serif"],
+        "mathtext.fontset": "cm",
+        "axes.unicode_minus": False,
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+    })
+
+
+def _paper_ticks(ax):
+    ax.tick_params(which="major", direction="in", top=True, right=True,
+                   labelsize=8.5, width=0.8, length=3)
+    ax.tick_params(which="minor", direction="in", top=True, right=True,
+                   width=0.55, length=1.8)
+    for spine in ax.spines.values():
+        spine.set_linewidth(0.8)
+
+
+def plot_proposal_target(log_target, log_proposal, indices):
+    """Figure 5 and the exact hexagon data used to draw it."""
+    from matplotlib.colors import LinearSegmentedColormap
+    from matplotlib.ticker import AutoMinorLocator
+
+    _paper_style()
+    cmap = LinearSegmentedColormap.from_list(
+        "paper_blue", ["#d9e7ed", "#bad3df", "#8bb5c8", "#5997b1", "#2e799c", "#0b5f87"]
+    )
+    x, y = log_target[indices], log_proposal[indices]
+    limit = np.quantile(np.abs(np.concatenate([x, y])), 0.995)
+    fig = plt.figure(figsize=(3.9, 3.35))
+    ax = fig.add_axes((0.22, 0.18, 0.63, 0.735))
+    cax = fig.add_axes((0.88, 0.18, 0.035, 0.735))
+    hexbin = ax.hexbin(x, y, gridsize=70, mincnt=1, cmap=cmap)
+    counts = np.asarray(hexbin.get_array()).copy()
+    hexbin.set_array(counts / len(indices))
+    hexbin.set_clim(0, counts.max() / len(indices))
+    rho = np.corrcoef(log_target, log_proposal)[0, 1]
+    slope = np.polyfit(log_target, log_proposal, 1)[0]
+    rms = np.sqrt(np.mean((log_proposal - log_target) ** 2))
+    ax.plot([-limit, limit], [-limit, limit], color="#d55e00", lw=1.2, ls=(0, (4, 2.5)))
+    ax.text(0.045, 0.955, rf"$\rho={rho:.3f}$" + "\n"
+            + rf"slope$={slope:.3f}$" + "\n" + rf"RMS$={rms:.3f}$",
+            transform=ax.transAxes, va="top", fontsize=8,
+            bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.86, "pad": 1.8})
+    ax.set(xlim=(-limit, limit), ylim=(-limit, limit), aspect="equal")
+    ax.set_xlabel(r"Centered $\log A(\mathbf{x})$", fontsize=10)
+    ax.set_ylabel(r"Centered $\log[g_{\boldsymbol{\eta}}(\mathbf{x})/q_{\boldsymbol{\phi}}(\mathbf{x})]$", fontsize=10)
+    ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+    _paper_ticks(ax)
+    colorbar = fig.colorbar(hexbin, cax=cax)
+    colorbar.set_label("Probability per hexagon", fontsize=9, labelpad=2)
+    colorbar.ax.tick_params(labelsize=7.5)
+    histogram = {
+        "offsets": hexbin.get_offsets(), "vertices": hexbin.get_paths()[0].vertices,
+        "counts": counts, "n_events": len(indices), "axis_limit": limit,
+        "rho": rho, "slope": slope, "rms": rms,
+    }
+    return fig, histogram
+
+
+def plot_nis_convergence(summary):
+    """The three panels of Figure 6."""
+    from matplotlib.ticker import LogLocator, NullFormatter
+
+    _paper_style()
+    figures = {}
+    panels = [
+        ("nis_asimov_convergence_q0", "q0_iqr", r"IQR of $q_{0,A}$"),
+        ("nis_asimov_convergence_scan", "scan_rmse", r"RMS error over $t_A(\mu)$"),
+        ("nis_asimov_event_saving_factor", "G", r"$G=(\mathrm{IQR}_{q_{\boldsymbol{\phi}}}/\mathrm{IQR}_{\mathrm{NIS}})^2$"),
+    ]
+    for name, metric, label in panels:
+        fig = plt.figure(figsize=(3.45, 2.55))
+        ax = fig.add_axes((0.19, 0.20, 0.78, 0.76))
+        for method, color, marker in [("Direct reference", "#d55e00", "o"),
+                                       ("Neural importance", "#0072b2", "s")]:
+            if metric == "G" and method == "Direct reference":
+                continue
+            group = summary[summary["method"] == method].sort_values("sample_size")
+            ax.plot(group["sample_size"], group[metric], color=color, lw=1.35,
+                    marker="D" if metric == "G" else marker, ms=4,
+                    markerfacecolor="white" if method == "Direct reference" else color,
+                    label=method)
+        ax.set_xscale("log")
+        ax.set_xlim(470, 36000)
+        ax.set_xlabel(r"Number of Asimov points $M$", fontsize=10)
+        ax.set_ylabel(label, fontsize=10)
+        if metric == "G":
+            ax.axhline(1, color="#d55e00", lw=1.1, ls=(0, (4, 2.5)))
+            ax.set_ylim(0, 11.5)
+        else:
+            ax.set_yscale("log")
+            ax.set_ylim(0.007, 0.2)
+            ax.yaxis.set_minor_locator(LogLocator(base=10, subs=np.arange(2, 10) * 0.1))
+            ax.yaxis.set_minor_formatter(NullFormatter())
+            ax.legend(loc="upper right", frameon=False, fontsize=7.8)
+        ax.grid(which="major", color="#b8b8b8", lw=0.55, alpha=0.32)
+        ax.grid(which="minor", axis="y", color="#b8b8b8", lw=0.4, alpha=0.14)
+        _paper_ticks(ax)
+        figures[name] = fig
+    return figures
+
+
 def _weighted_correlation(values, weights):
     """Return a feature correlation matrix with optional event weights."""
     values = np.asarray(values, dtype=np.float64)

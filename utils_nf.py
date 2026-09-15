@@ -456,7 +456,7 @@ def train_flow(
     weight_decay = float(training_config.get("weight_decay", 0.0))
     validation_fraction = float(training_config.get("validation_fraction", 0.2))
     patience = int(training_config.get("patience", n_epochs))
-    gradient_clip = float(training_config.get("gradient_clip", 5.0))
+    gradient_clip = training_config.get("gradient_clip", 5.0)
     lr_scheduler_factor = float(training_config.get("lr_scheduler_factor", 0.2))
     lr_scheduler_patience = int(training_config.get("lr_scheduler_patience", 2))
     min_learning_rate = float(training_config.get("min_learning_rate", learning_rate * 0.001))
@@ -494,24 +494,27 @@ def train_flow(
                 loss = event_nll.mean()
             else:
                 batch_weights = packed_batch[1].to(device)
-                loss = torch.sum(batch_weights * event_nll) / torch.sum(batch_weights)
+                loss = torch.sum(batch_weights * event_nll) / len(batch)
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(flow.parameters(), max_norm=gradient_clip)
+            if gradient_clip is not None:
+                torch.nn.utils.clip_grad_norm_(flow.parameters(), max_norm=gradient_clip)
             optimizer.step()
         flow.eval()
-        val_losses = []
+        val_nll_sum = 0.0
+        val_weight_sum = 0.0
         with torch.no_grad():
             for packed_batch in val_loader:
                 batch = packed_batch[0].to(device)
                 event_nll = -flow.log_prob(batch)
                 if len(packed_batch) == 1:
-                    val_loss = event_nll.mean()
+                    val_nll_sum += float(event_nll.sum().detach().cpu())
+                    val_weight_sum += len(batch)
                 else:
                     batch_weights = packed_batch[1].to(device)
-                    val_loss = torch.sum(batch_weights * event_nll) / torch.sum(batch_weights)
-                val_losses.append(float(val_loss.detach().cpu()))
-        val_loss = float(np.mean(val_losses))
+                    val_nll_sum += float(torch.sum(batch_weights * event_nll).detach().cpu())
+                    val_weight_sum += float(batch_weights.sum().detach().cpu())
+        val_loss = val_nll_sum / val_weight_sum
         learning_rate_before_step = float(optimizer.param_groups[0]["lr"])
         scheduler.step(val_loss)
         current_learning_rate = float(optimizer.param_groups[0]["lr"])
@@ -559,7 +562,7 @@ def flow_log_prob_x(flow_pack, x, batch_size=65536):
         x_tensor = torch.tensor(x_scaled, dtype=torch.float32, device=device)
         log_p_scaled = flow.log_prob(x_tensor).detach().cpu().numpy()
         chunks.append(log_p_scaled + scaler.log_det_x_to_z_standardization)
-        return np.concatenate(chunks)
+    return np.concatenate(chunks)
 
 
 @torch.no_grad()
@@ -575,4 +578,4 @@ def flow_sample_x(flow_pack, n, batch_size=65536):
         sample = flow.sample(current_batch).detach().cpu().numpy()
         chunks.append(scaler.inverse(sample))
         remaining -= current_batch
-        return np.concatenate(chunks, axis=0)
+    return np.concatenate(chunks, axis=0)
