@@ -70,10 +70,12 @@ def plot_proposal_target(log_target, log_proposal, indices):
 
 
 def plot_nis_convergence(summary):
-    """The three panels of Figure 6."""
-    from matplotlib.ticker import LogLocator, NullFormatter
+    """The three panels of Figure 6, showing sample sizes through 2**14."""
+    from matplotlib.ticker import LogLocator, NullFormatter, NullLocator
 
     _paper_style()
+    displayed_summary = summary[summary["sample_size"] != 2**15]
+    sample_sizes = 2 ** np.arange(9, 15)
     figures = {}
     panels = [
         ("nis_asimov_convergence_q0", "q0_iqr", r"IQR of $q_{0,A}$"),
@@ -87,13 +89,15 @@ def plot_nis_convergence(summary):
                                        ("Neural importance", "#0072b2", "s")]:
             if metric == "G" and method == "Direct reference":
                 continue
-            group = summary[summary["method"] == method].sort_values("sample_size")
+            group = displayed_summary[displayed_summary["method"] == method].sort_values("sample_size")
             ax.plot(group["sample_size"], group[metric], color=color, lw=1.35,
                     marker="D" if metric == "G" else marker, ms=4,
                     markerfacecolor="white" if method == "Direct reference" else color,
                     label=method)
-        ax.set_xscale("log")
-        ax.set_xlim(470, 36000)
+        ax.set_xscale("log", base=2)
+        ax.set_xticks(sample_sizes, [rf"$2^{{{exponent}}}$" for exponent in range(9, 15)])
+        ax.xaxis.set_minor_locator(NullLocator())
+        ax.set_xlim(470, 18000)
         ax.set_xlabel(r"Number of Asimov points $M$", fontsize=10)
         ax.set_ylabel(label, fontsize=10)
         if metric == "G":
